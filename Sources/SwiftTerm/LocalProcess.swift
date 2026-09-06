@@ -391,11 +391,12 @@ public class LocalProcess {
             // byte, a signal is its own number, with the top bit of the low
             // byte for a core dump.
             //
-            // The masks are not decoration. `waitid` reports what the child
-            // passed to `exit` in full, where `waitpid` only ever had a byte to
-            // put it in and truncated it — measured against the same child,
-            // `exit(256)` reads as 0 through `waitpid` and as 256 here, and
-            // `exit(4660)` as 13312 against 1192960. Shifting the untruncated
+            // The masks are not decoration. `waitid` keeps more of what the
+            // child passed to `exit` than `waitpid` ever had room for — three
+            // bytes against one, not the whole `Int32`: measured against the
+            // same child, `exit(256)` reads as 0 through `waitpid` and as 256
+            // here, `exit(4660)` as 13312 against 1192960, and both `exit(-1)`
+            // and `exit(INT_MAX)` come back as 16777215. Shifting the wider
             // value would tell the delegate something this never used to say.
             switch info.si_code {
             case CLD_EXITED: n = (info.si_status & 0xff) << 8
