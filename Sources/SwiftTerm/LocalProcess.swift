@@ -390,10 +390,17 @@ public class LocalProcess {
             // delegate is told is unchanged: an exit is its code in the high
             // byte, a signal is its own number, with the top bit of the low
             // byte for a core dump.
+            //
+            // The masks are not decoration. `waitid` reports what the child
+            // passed to `exit` in full, where `waitpid` only ever had a byte to
+            // put it in and truncated it — measured against the same child,
+            // `exit(256)` reads as 0 through `waitpid` and as 256 here, and
+            // `exit(4660)` as 13312 against 1192960. Shifting the untruncated
+            // value would tell the delegate something this never used to say.
             switch info.si_code {
-            case CLD_EXITED: n = info.si_status << 8
-            case CLD_DUMPED: n = info.si_status | 0x80
-            default: n = info.si_status
+            case CLD_EXITED: n = (info.si_status & 0xff) << 8
+            case CLD_DUMPED: n = (info.si_status & 0x7f) | 0x80
+            default: n = info.si_status & 0x7f
             }
         }
         delegate?.processTerminated(self, exitCode: n)
@@ -544,10 +551,10 @@ public class LocalProcess {
             // Publish process state before arming the exit source below. The
             // source's event handler (installed just below) can be invoked
             // synchronously by activate() when the child has already exited,
-            // and processTerminated() reads self.shellPid (a 0 here makes
-            // waitpid(0, ...) target the caller's process group, which never
-            // matches the setsid child). Setting the process state first
-            // keeps that early callback correct.
+            // and processTerminated() reads self.shellPid to ask the kernel
+            // about it — a 0 there names no child at all, so the status is
+            // never read and the delegate is told an exit of nothing. Setting
+            // the process state first keeps that early callback correct.
             running = true
             self.childfd = childfd
             self.shellPid = shellPid
@@ -558,10 +565,11 @@ public class LocalProcess {
                 // is delivered at most once; if the source is activated first
                 // and a fast-exiting child's exit fires before the handler is
                 // set, the event is dropped and never redelivered, so
-                // processTerminated() never runs — the child is not reaped and
-                // callers waiting on exit hang. Also resume() on the pre-10.12
-                // path, which previously did nothing (the source is created
-                // suspended, so without resume it never starts).
+                // processTerminated() never runs — the delegate is never told
+                // the child went, and callers waiting on exit hang. Also
+                // resume() on the pre-10.12 path, which previously did nothing
+                // (the source is created suspended, so without resume it never
+                // starts).
                 cm.setEventHandler(handler: { [weak self] in self?.processTerminated () })
                 if #available(macOS 10.12, *) {
                     cm.activate()
