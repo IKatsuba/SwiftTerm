@@ -364,8 +364,38 @@ public class LocalProcess {
 
     func processTerminated ()
     {
+        // The exit status is read without collecting the child. `WNOWAIT`
+        // leaves it waitable, so the kernel goes on holding its pid — and with
+        // it the session that pid names — until the embedder waits for it
+        // itself.
+        //
+        // That is what an embedder needs to end what a pane started. A pane's
+        // program is a session leader, and everything started in the pane is in
+        // its session whoever the parent has become; but the moment the leader
+        // is collected its number is the machine's to give away, and work the
+        // pane left behind can no longer be told from a stranger's. Measured on
+        // macOS 15: a session number whose leader had been reaped was handed
+        // out again 0.45ms later, while an unreaped leader's number was skipped
+        // for a whole lap of the allocator. Reaping here is therefore the one
+        // thing this cannot do (chorded, CHRD-125).
+        //
+        // The corpse is the embedder's to collect, at whatever moment it stops
+        // needing the name. One that never collects it leaves a zombie for as
+        // long as it runs; when it exits, the corpse is launchd's and collected
+        // there.
+        var info = siginfo_t()
         var n: Int32 = 0
-        waitpid (shellPid, &n, WNOHANG)
+        if waitid(P_PID, id_t(shellPid), &info, WEXITED | WNOWAIT) == 0 {
+            // Rebuilt in the shape `waitpid` used to fill in, so that what the
+            // delegate is told is unchanged: an exit is its code in the high
+            // byte, a signal is its own number, with the top bit of the low
+            // byte for a core dump.
+            switch info.si_code {
+            case CLD_EXITED: n = info.si_status << 8
+            case CLD_DUMPED: n = info.si_status | 0x80
+            default: n = info.si_status
+            }
+        }
         delegate?.processTerminated(self, exitCode: n)
         childStopped()
     }
