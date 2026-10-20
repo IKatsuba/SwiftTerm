@@ -1166,6 +1166,12 @@ open class Terminal {
     /// should clear can be cleared in step with the byte stream.
     public var resetHandler: (() -> ())?
 
+    /// Invoked after the terminal's own handling of an OSC 133 semantic
+    /// prompt, with its action (`A`, `B`, `C`, `D`, `N`, …), so a client
+    /// can follow prompts without replacing that handling. Called for every
+    /// sequence whose action is one character, in byte order with the stream.
+    public var semanticPromptHandler: ((Character) -> ())?
+
     /// This allows users of the terminal to register a handler for an OSC code.
     /// - Parameters:
     ///  - code: the code for the OSC handler to register, no checks are made that this overrides an existing handler
@@ -2446,6 +2452,11 @@ open class Terminal {
     // OSC 133 — semantic prompts. Unknown actions, and options with unknown
     // or malformed values, are ignored entirely.
     func oscSemanticPrompt(_ data: ArraySlice<UInt8>) {
+        defer {
+            if let action = data.first, data.dropFirst().first ?? UInt8(ascii: ";") == UInt8(ascii: ";") {
+                semanticPromptHandler?(Character(UnicodeScalar(action)))
+            }
+        }
         guard !isCurrentBufferAlternate,
               let text = String(bytes: data, encoding: .utf8),
               !text.isEmpty else { return }
