@@ -1161,6 +1161,11 @@ open class Terminal {
         }
     }
     
+    /// Invoked after a full reset (RIS, `ESC c`) has returned the terminal to
+    /// its initial state, so state kept outside the terminal that a reset
+    /// should clear can be cleared in step with the byte stream.
+    public var resetHandler: (() -> ())?
+
     /// This allows users of the terminal to register a handler for an OSC code.
     /// - Parameters:
     ///  - code: the code for the OSC handler to register, no checks are made that this overrides an existing handler
@@ -6663,6 +6668,7 @@ open class Terminal {
     {
             parser.reset ()
             resetToInitialState ()
+            resetHandler?()
     }
             
     //
