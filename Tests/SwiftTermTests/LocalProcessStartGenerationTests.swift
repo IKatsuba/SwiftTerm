@@ -61,19 +61,22 @@ final class LocalProcessStartGenerationTests {
         #expect(refused)
         #expect(process.startGeneration == 1)
         var status: Int32 = 0
-        if !refused {
-            // Taken anyway: reap that child too rather than leave it behind.
+        guard refused else {
+            // Taken anyway: reap both children and signal neither, since
+            // terminate() would aim at a number this test may have collected.
             let stray = process.shellPid
             if stray > 0, stray != pid {
                 #expect(waitUntil { waitpid(stray, &status, WNOHANG) == stray })
             }
+            #expect(waitUntil { waitpid(pid, &status, WNOHANG) == pid })
+            return
         }
-        #expect(waitUntil { watcher.terminated >= 1 })
+        #expect(waitUntil { watcher.terminated == 1 })
         // Called while the exited child is unreaped — LocalProcess reads exits
         // with WNOWAIT and never collects — so its SIGTERM can reach only the
         // corpse this test started.
         process.terminate()
-        #expect(process.startGeneration == (refused ? 1 : 2))
+        #expect(process.startGeneration == 1)
         #expect(waitpid(pid, &status, WNOHANG) == pid)
     }
 
