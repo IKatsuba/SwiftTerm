@@ -68,6 +68,22 @@ public class LocalProcess {
     
     /* The PID of our subprocess */
     public private(set) var shellPid: pid_t = 0
+
+    /// Counts the starts whose fork succeeded, as a receipt a host can compare
+    /// across a `startProcess` call.
+    ///
+    /// `shellPid`, `childfd` and `running` cannot serve as that receipt. A
+    /// refused fork leaves `shellPid` at the last child's number, and the
+    /// kernel may hand a successful fork that same number again; EOF resets
+    /// the `childfd` marker to -1 and `running` to false, so a child that
+    /// exits before the host looks leaves every published value as a refused
+    /// start would. Chorded's `PaneTenure` must know a start happened to take
+    /// on its process and retire its pty exactly once.
+    ///
+    /// It rises in the parent once `forkpty` succeeds, before the read loop
+    /// and exit source are armed, and nothing else changes it: EOF,
+    /// `childProcessRead`, `terminate` and a refused start leave it alone.
+    public private(set) var startGeneration: UInt64 = 0
     var debugIO = false
     
     /* number of sent requests */
@@ -417,18 +433,21 @@ public class LocalProcess {
      * - Parameter args: an array of strings that is passed as the arguments to the underlying process
      * - Parameter environment: an array of environment variables to pass to the child process, if this is null, this picks a good set of defaults from `Terminal.getEnvironmentVariables`.
      * - Parameter execName: If provided, this is used as the Unix argv[0] parameter, otherwise, the executable is used as the args [0], this is used when the intent is to set a different process name than the file that backs it.
+     * - Returns: whether a child was forked; `startGeneration` records the same answer.
      */
-    public func startProcess(executable: String = "/bin/bash", args: [String] = [], environment: [String]? = nil, execName: String? = nil, currentDirectory: String? = nil)
+    @discardableResult
+    public func startProcess(executable: String = "/bin/bash", args: [String] = [], environment: [String]? = nil, execName: String? = nil, currentDirectory: String? = nil) -> Bool
      {
         if running {
-            return
+            return false
         }
-        
+        let generation = startGeneration
         #if false //canImport(Subprocess)
         startProcessWithSubprocess(executable: executable, args: args, environment: environment, execName: execName, currentDirectory: currentDirectory)
         #else
         startProcessWithForkpty(executable: executable, args: args, environment: environment, execName: execName, currentDirectory: currentDirectory)
         #endif
+        return startGeneration != generation
     }
     
     #if false //canImport(Subprocess)
@@ -559,6 +578,7 @@ public class LocalProcess {
             running = true
             self.childfd = childfd
             self.shellPid = shellPid
+            startGeneration &+= 1
 #if os(macOS)
             childMonitor = DispatchSource.makeProcessSource(identifier: shellPid, eventMask: .exit, queue: dispatchQueue)
             if let cm = childMonitor {

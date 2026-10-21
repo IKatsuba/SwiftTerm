@@ -179,12 +179,13 @@ open class LocalProcessTerminalView: TerminalView, TerminalViewDelegate, LocalPr
      * - Parameter execName: If provided, this is used as the Unix argv[0] parameter, otherwise, the executable is used as the args [0], this is used when the intent is to set a different process name than the file that backs it.
      * - Parameter currentDirectory: If provided, the process will be launched with this as the current working directory.
      */
-    public func startProcess(executable: String = "/bin/bash", args: [String] = [], environment: [String]? = nil, execName: String? = nil, currentDirectory: String? = nil)
+    @discardableResult
+    public func startProcess(executable: String = "/bin/bash", args: [String] = [], environment: [String]? = nil, execName: String? = nil, currentDirectory: String? = nil) -> Bool
     {
         // A nil environment keeps the LocalProcess default (TERM=xterm-256color);
         // hosts that want options.termName in the child's environment pass
         // Terminal.getEnvironmentVariables(termName:) explicitly
-        process.startProcess(executable: executable, args: args, environment: environment, execName: execName, currentDirectory: currentDirectory)
+        return process.startProcess(executable: executable, args: args, environment: environment, execName: execName, currentDirectory: currentDirectory)
     }
 
     /**
