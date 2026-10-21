@@ -1172,6 +1172,13 @@ open class Terminal {
     /// sequence whose action is one character, in byte order with the stream.
     public var semanticPromptHandler: ((Character) -> ())?
 
+    /// Invoked with an OSC 1337 payload SwiftTerm does not draw itself, the
+    /// bytes after `1337;`, before the delegate's `iTermContent` is told.
+    /// A host whose view inherits the delegate conformance cannot receive
+    /// that call, and registering an OSC 1337 handler would replace inline
+    /// images; this hears the rest in step with the byte stream.
+    public var iTermContentHandler: ((ArraySlice<UInt8>) -> ())?
+
     /// This allows users of the terminal to register a handler for an OSC code.
     /// - Parameters:
     ///  - code: the code for the OSC handler to register, no checks are made that this overrides an existing handler
@@ -2852,6 +2859,7 @@ open class Terminal {
             break
         }
         
+        iTermContentHandler?(data)
         tdel?.iTermContent(source: self, content: data)
     }
     
