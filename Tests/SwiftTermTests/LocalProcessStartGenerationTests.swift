@@ -34,47 +34,70 @@ final class LocalProcessStartGenerationTests {
     }
 
     @Test("A successful fork raises it and reports success")
-    func successRaisesIt() {
+    func successRaisesIt() throws {
         let watcher = ExitWatcher()
         let process = LocalProcess(delegate: watcher, dispatchQueue: queue)
         #expect(process.startGeneration == 0)
-        #expect(process.startProcess(executable: "/bin/sh", args: ["-c", "exit 0"]))
+        try #require(process.startProcess(executable: "/bin/sh", args: ["-c", "exit 0"]))
+        let pid = process.shellPid
+        try #require(pid > 0)
         #expect(process.startGeneration == 1)
         #expect(waitUntil { watcher.terminated == 1 })
+        var status: Int32 = 0
+        #expect(waitpid(pid, &status, WNOHANG) == pid)
     }
 
     @Test("A refused start while running leaves it alone, as does terminate")
-    func refusedStartKeepsIt() {
+    func refusedStartKeepsIt() throws {
         let watcher = ExitWatcher()
         let process = LocalProcess(delegate: watcher, dispatchQueue: queue)
-        #expect(process.startProcess(executable: "/bin/sleep", args: ["30"]))
-        #expect(process.startGeneration == 1)
-        #expect(!process.startProcess(executable: "/bin/sh", args: ["-c", "exit 0"]))
-        #expect(process.startGeneration == 1)
+        // A child that ends by itself: the runner's children may ignore the
+        // SIGTERM terminate() sends, and this test sends no signal of its own.
+        try #require(process.startProcess(executable: "/bin/sleep", args: ["3"]))
         let pid = process.shellPid
-        process.terminate()
+        try #require(pid > 0)
         #expect(process.startGeneration == 1)
-        // terminate() cancels the exit source, so the child is reaped here;
-        // SIGTERM may be held off in the forked child, and an unreaped child's
-        // number is still ours to signal.
-        kill(pid, SIGKILL)
+        let refused = !process.startProcess(executable: "/bin/sh", args: ["-c", "exit 0"])
+        #expect(refused)
+        #expect(process.startGeneration == 1)
         var status: Int32 = 0
-        #expect(waitpid(pid, &status, 0) == pid)
+        if !refused {
+            // Taken anyway: reap that child too rather than leave it behind.
+            let stray = process.shellPid
+            if stray > 0, stray != pid {
+                #expect(waitUntil { waitpid(stray, &status, WNOHANG) == stray })
+            }
+        }
+        #expect(waitUntil { watcher.terminated >= 1 })
+        // Called while the exited child is unreaped — LocalProcess reads exits
+        // with WNOWAIT and never collects — so its SIGTERM can reach only the
+        // corpse this test started.
+        process.terminate()
+        #expect(process.startGeneration == (refused ? 1 : 2))
+        #expect(waitpid(pid, &status, WNOHANG) == pid)
     }
 
     @Test("EOF from a short-lived child keeps it, and the next start raises it again")
-    func eofKeepsIt() {
+    func eofKeepsIt() throws {
         let watcher = ExitWatcher()
         let process = LocalProcess(delegate: watcher, dispatchQueue: queue)
-        #expect(process.startProcess(executable: "/bin/sh", args: ["-c", "exit 0"]))
+        try #require(process.startProcess(executable: "/bin/sh", args: ["-c", "exit 0"]))
+        let first = process.shellPid
+        try #require(first > 0)
         // EOF is what resets the marker; waiting for it is what puts the
         // process in the state a refused start would also leave.
         #expect(waitUntil { process.childfd == -1 && !process.running })
         #expect(waitUntil { watcher.terminated == 1 })
         #expect(process.startGeneration == 1)
-        #expect(process.startProcess(executable: "/bin/sh", args: ["-c", "exit 0"]))
+        var status: Int32 = 0
+        #expect(waitpid(first, &status, WNOHANG) == first)
+
+        try #require(process.startProcess(executable: "/bin/sh", args: ["-c", "exit 0"]))
+        let second = process.shellPid
+        try #require(second > 0)
         #expect(process.startGeneration == 2)
         #expect(waitUntil { watcher.terminated == 2 })
+        #expect(waitpid(second, &status, WNOHANG) == second)
     }
 }
 #endif
